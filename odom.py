@@ -13,7 +13,7 @@ prev_file = None
 
 XPOS = 0.0
 YPOS = 0.0
-frame_skip = 3
+frame_skip = 0
 frame_count = 0
 
 vis = o3d.visualization.Visualizer()
@@ -70,9 +70,10 @@ def pygame_plotter(get_pos, stop_event):
     pygame.quit()
 
 def remove(prev_file):
-    if prev_file and os.path.exists(prev_file):
+    if prev_file and prev_file != last_file and os.path.exists(prev_file):
         try:
             os.remove(prev_file)
+            # print(f"Deleted: {prev_file}")
         except Exception as e:
             print(f"Error deleting {prev_file}: {e}")
 
@@ -112,7 +113,7 @@ def perform_icp_point_to_plane(source, target):
 
     reg_p2p = o3d.pipelines.registration.registration_icp(
         source, target, threshold, trans_init,
-        o3d.pipelines.registration.TransformationEstimationPointToPlane())
+        o3d.pipelines.registration.TransformationEstimationPointToPoint())
 
     return reg_p2p.transformation, reg_p2p.inlier_rmse
 
@@ -124,8 +125,8 @@ pygame_thread.start()
 
 try:
     while True:
-        file = max(glob.glob(os.path.join(pcd_dir, "*.pcd")), key=os.path.getctime, default=None)
-        if file and file != last_file:
+        pcd_files = sorted(glob.glob(os.path.join(pcd_dir, "*.pcd")))
+        for file in pcd_files:
             if file not in seen:
                 # print("New file:", file)
                 seen.add(file)
@@ -135,27 +136,25 @@ try:
 
                 if not added:
                     pcd.points = new_pcd.points
-                    print(new_pcd.points)
+                    # print(new_pcd.points)
                     vis.add_geometry(pcd)
                     added = True
                 else:
                     pcd.points = new_pcd.points
 
-                frame_count += 1
-
-                if frame_count % frame_skip == 0:
-                    vis.update_geometry(pcd)
-                    vis.poll_events()
-                    vis.update_renderer()
+                vis.update_geometry(pcd)
+                vis.poll_events()
+                vis.update_renderer()
 
                 calc_traj(last_file, new_pcd, trajectory)
                 threading.Thread(target=remove, args=(prev_file,), daemon=True).start()
-                print(f"Current Position: X={XPOS:.4f}, Y={YPOS:.4f}")
+                # print(f"Current Position: X={XPOS:.4f}, Y={YPOS:.4f}")
 
                 prev_file = last_file
                 last_file = file
+            time.sleep(0.001)
 
-        time.sleep(0.1)
+        time.sleep(0.001)
 except KeyboardInterrupt:
     print("Exiting.")
     vis.destroy_window()
