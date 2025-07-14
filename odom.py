@@ -23,7 +23,7 @@ pcd = o3d.geometry.PointCloud()
 vis.get_render_option().background_color = [0, 0, 0]  
 added = False
 
-transformation = np.eye(4)
+transformation = np.eye(4) #identity matrix of size 4x4
 odometry = np.eye(4)
 trajectory = [] 
 
@@ -84,25 +84,29 @@ def calc_traj(last_file, new_pcd, trajectory):
         last_pcd = last_pcd.voxel_down_sample(voxel_size=0.1)
         try:
             transformation, inlier_rmse3 = perform_icp_point_to_plane(last_pcd, new_pcd)
-            if not np.allclose(transformation, np.eye(4), atol=1e-2):
-                proposed = np.dot(odometry, transformation)
-                if np.linalg.norm(proposed[:2, 3] - odometry[:2, 3]) > 0.5:
+            if not np.allclose(transformation, np.eye(4), atol=1e-2): #allclose checks if two matrices are equal
+                proposed = np.dot(odometry, transformation) #next pose estimate
+
+                #odometry[:2,3] -> first two elements of last column
+
+                if np.linalg.norm(proposed[:2, 3] - odometry[:2, 3]) > 0.5: #distance between x and y coords of the poses
                     return 
-                odometry = np.dot(odometry, transformation)
+                odometry = np.dot(odometry, transformation) # = proposed
             trajectory.append(odometry[:3, 3].copy())
             XPOS, YPOS = odometry[0, 3], odometry[1, 3]
         except:
             return
-    else:
+    else: #for the very first frame
         trajectory.append(odometry[:3, 3].copy())
         XPOS, YPOS = odometry[0, 3], odometry[1, 3]
     
 
 def perform_icp_point_to_plane(source, target):
-
+    # to find surface normals -> needed for point to plane  
     o3d.geometry.PointCloud.estimate_normals(
         source,
-        search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=1, max_nn=30))
+        search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=1, max_nn=30)) #nearest neighbour search 
+    #the points are scattered and dont define a surface -> KDTree fits a plane through the points to visualiza surface
 
     o3d.geometry.PointCloud.estimate_normals(
         target,
@@ -113,11 +117,12 @@ def perform_icp_point_to_plane(source, target):
 
     reg_p2p = o3d.pipelines.registration.registration_icp(
         source, target, threshold, trans_init,
-        o3d.pipelines.registration.TransformationEstimationPointToPoint())
+        o3d.pipelines.registration.TransformationEstimationPointToPlane())
 
     return reg_p2p.transformation, reg_p2p.inlier_rmse
 
 stop_event = threading.Event()
+
 def get_pos():
     return XPOS, YPOS
 pygame_thread = threading.Thread(target=pygame_plotter, args=(get_pos, stop_event))
