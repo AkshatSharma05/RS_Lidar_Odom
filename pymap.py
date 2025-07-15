@@ -3,7 +3,6 @@ import time
 import numpy as np
 import threading
 import pygame
-import matplotlib.pyplot as plt
 
 class LidarOdometry:
     def __init__(self, pcd_dir="./pcd"):

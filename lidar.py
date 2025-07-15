@@ -39,29 +39,40 @@ class LidarOdometry:
         self.odometry = np.eye(4)
         self.trajectory = [] 
 
+        self.traj_line = o3d.geometry.LineSet()
+        self.traj_points = []
+        self.traj_indices = []
+        self.traj_added = False
+
+
         self.stop_event = threading.Event()
-        self.pygame_thread = threading.Thread(target=self.pygame_plotter, args=(self.get_pos, self.stop_event))
+        self.pygame_thread = threading.Thread(target=self.pygame_plotter, args=(self.get_pos,  self.get_local_map, self.stop_event))
         self.pygame_thread.start()
 
     def get_pos(self):
         return self.XPOS, self.YPOS
 
-    def pygame_plotter(self, get_pos, stop_event):
+    def get_local_map(self):
+        return self.local_map
+
+    def pygame_plotter(self, get_pos, get_map, stop_event):
         pygame.init()
         size = 600
-        screen = pygame.display.set_mode((size, size))
-        pygame.display.set_caption("odom")
+        screen = pygame.display.set_mode((size, size))  # Single panel
+        pygame.display.set_caption("Odometry + 2D Lidar Map")
         clock = pygame.time.Clock()
+
         white = (255, 255, 255)
         blue = (0, 0, 255)
         black = (0, 0, 0)
+        red = (255, 0, 0)
+
         points = []
 
-        world_min = -5
-        world_max = 5
+        world_min = -10
+        world_max = 10
 
         def world_to_screen(x, y):
-            # Map world coordinates to screen
             sx = int((x - world_min) / (world_max - world_min) * size)
             sy = int(size - (y - world_min) / (world_max - world_min) * size)
             return sx, sy
@@ -72,27 +83,40 @@ class LidarOdometry:
                     stop_event.set()
                     return
 
+            screen.fill(white)
+
+            # === Draw odometry ===
             xpos, ypos = get_pos()
             points.append(world_to_screen(xpos, ypos))
-
-            screen.fill(white)
             if len(points) > 1:
                 pygame.draw.lines(screen, blue, False, points, 2)
             for pt in points:
                 pygame.draw.circle(screen, black, pt, 2)
+
+            # === Draw lidar map (in global frame) ===
+            local_map = get_map()
+            if local_map is not None:
+                for pt in local_map:
+                    x, y = pt[0], pt[1]
+                    sx, sy = world_to_screen(x, y)
+                    if 0 <= sx < size and 0 <= sy < size:
+                        pygame.draw.circle(screen, red, (sx, sy), 1)
+
             pygame.display.flip()
             clock.tick(30)
+
         pygame.quit()
 
+
     def calc_traj(self, last_file, new_pcd, trajectory):
-        def get_map_2d(new_pcd, z_min=0.0, z_max=2.0):
-            arr = np.asarray(new_pcd.points)
+        def get_map_2d(pcd, z_min=0.0, z_max=2.0):
+            arr = np.asarray(pcd.points)
             mask = (arr[:, 2] >= z_min) & (arr[:, 2] <= z_max)
             arr_2d = arr[mask][:, :2]
             return arr_2d
         
         def update_voxel_map(voxel_map, global_map, new_pcd, pose, current_frame,
-                         voxel_size=0.2, min_hits=50, decay_thresh=20):
+                         voxel_size=0.1, min_hits=50, decay_thresh=20):
             transformed_points = np.asarray(new_pcd.transform(pose).points)
 
             for pt in transformed_points:
@@ -105,7 +129,6 @@ class LidarOdometry:
                 else:
                     voxel_map[key] = [1, current_frame, False]  # seen_count, last_seen, is_static
 
-            # Remove stale dynamic points
             keys_to_remove = []
             for key, (count, last_seen, is_static) in voxel_map.items():
                 if not is_static and current_frame - last_seen > decay_thresh:
@@ -113,7 +136,6 @@ class LidarOdometry:
             for key in keys_to_remove:
                 del voxel_map[key]
 
-            # Generate new static global map
             static_points = [np.array(key, dtype=float) * voxel_size
                             for key, val in voxel_map.items() if val[2]]
             global_map.points = o3d.utility.Vector3dVector(np.array(static_points))
@@ -123,27 +145,11 @@ class LidarOdometry:
             last_pcd = o3d.io.read_point_cloud(last_file)
             last_pcd = last_pcd.voxel_down_sample(voxel_size=0.1)
             try:
+                self.local_map = get_map_2d(self.global_map, z_min=0.0, z_max=2.0)
+
                 transformation, _ = self.perform_icp_point_to_plane(last_pcd, new_pcd)
                 if not np.allclose(transformation, np.eye(4), atol=1e-2): #allclose checks if two matrices are equal
                     self.odometry = np.dot(self.odometry, transformation) # = proposed
-            
-                # filtered_points = filter_static_points(new_pcd, self.odometry.copy())
-                # if filtered_points.any():
-                    # self.global_map.points.extend(o3d.utility.Vector3dVector(filtered_points))
-                # self.local_map = get_map_2d(new_pcd, z_min=0.0, z_max=2.0)
-                # kdtree = o3d.geometry.KDTreeFlann(self.global_map)
-                # unique_points = []
-                # for pt in np.asarray(new_pcd.points):
-                #     [_, idx, _] = kdtree.search_radius_vector_3d(pt, 0.3)
-                #     if len(idx) == 0:
-                #         unique_points.append(pt)
-                # if unique_points:
-                #     self.global_map.points.extend(o3d.utility.Vector3dVector(np.array(unique_points)))
-
-
-                # if translation_delta > 0.1 or rotation_delta > np.deg2rad(5):
-                #     map_points = new_pcd.transform(self.odometry.copy()).points
-                #     self.global_map.points.extend(map_points)
 
                 self.current_frame += 1
                 update_voxel_map(self.voxel_map, self.global_map, new_pcd,
@@ -153,10 +159,27 @@ class LidarOdometry:
 
                 trajectory.append(self.odometry[:3, 3].copy())
                 self.XPOS, self.YPOS = self.odometry[0, 3], self.odometry[1, 3]
+
+
+                # self.traj_points.append(self.odometry[:3, 3].copy())
+                # traj_xyz = o3d.utility.Vector3dVector(self.traj_points)
+                # self.traj_line.points = traj_xyz
+
+                # # Update line indices if we have at least 2 points
+                # if len(self.traj_points) > 1:
+                #     self.traj_indices = [[i - 1, i] for i in range(1, len(self.traj_points))]
+                #     self.traj_line.lines = o3d.utility.Vector2iVector(self.traj_indices)
+
+                # if not self.traj_added:
+                #     self.vis.add_geometry(self.traj_line)
+                #     self.traj_added = True
+                # else:
+                #     self.vis.update_geometry(self.traj_line)
             except:
                 return
         else: #for the very first frame
             trajectory.append(self.odometry[:3, 3].copy())
+            self.traj_points.append(self.odometry[:3, 3].copy())
             self.XPOS, self.YPOS = self.odometry[0, 3], self.odometry[1, 3]
             map_points = new_pcd.transform(self.odometry.copy()).points
             self.global_map.points.extend(map_points)
