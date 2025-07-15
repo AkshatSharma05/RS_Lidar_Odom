@@ -264,7 +264,7 @@ void processCloud(void)
       free_cloud_queue.push(msg);
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(15)); // Prevent busy looping
+    std::this_thread::sleep_for(std::chrono::milliseconds(50)); // Prevent busy looping
   }
   
 }
@@ -322,4 +322,3 @@ int main(int argc, char* argv[])
 
   return 0;
 }
-

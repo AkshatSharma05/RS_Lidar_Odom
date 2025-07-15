@@ -105,21 +105,21 @@ class LidarOdometry:
 
     def perform_icp_point_to_plane(self, source, target):
         # to find surface normals -> needed for point to plane  
-        o3d.geometry.PointCloud.estimate_normals(
-            source,
-            search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=1, max_nn=30)) #nearest neighbour search 
-        #the points are scattered and dont define a surface -> KDTree fits a plane through the points to visualiza surface
+        # o3d.geometry.PointCloud.estimate_normals(
+        #     source,
+        #     search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=1, max_nn=30)) #nearest neighbour search 
+        # #the points are scattered and dont define a surface -> KDTree fits a plane through the points to visualiza surface
 
-        o3d.geometry.PointCloud.estimate_normals(
-            target,
-            search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=1, max_nn=30))
+        # o3d.geometry.PointCloud.estimate_normals(
+        #     target,
+        #     search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=1, max_nn=30))
 
         threshold = 1.5 
         trans_init = self.transformation
 
         reg_p2p = o3d.pipelines.registration.registration_icp(
             source, target, threshold, trans_init,
-            o3d.pipelines.registration.TransformationEstimationPointToPlane())
+            o3d.pipelines.registration.TransformationEstimationPointToPoint())
 
         return reg_p2p.transformation, reg_p2p.inlier_rmse
 
@@ -128,14 +128,11 @@ class LidarOdometry:
             while True:
                 file = './pcd/latest.pcd'
 
-                if not os.path.exists(file) or os.path.getsize(file) < 100:
-                    # time.sleep(0.01)
-                    continue
                 # pcd_files = sorted(glob.glob(os.path.join(self.pcd_dir, "*.pcd")))
                 # for file in pcd_files:
                 #     if file not in self.seen:
                     # print("New file:", file)
-                self.seen.add(file)
+                # self.seen.add(file)
 
                 new_pcd = o3d.io.read_point_cloud(file)
                 if new_pcd.is_empty():
@@ -159,11 +156,11 @@ class LidarOdometry:
                 # threading.Thread(target=self.remove, args=(self.prev_file,), daemon=True).start()
                 # print(f"Current Position: X={XPOS:.4f}, Y={YPOS:.4f}")
 
-                self.prev_file = self.last_file
+                # self.prev_file = self.last_file
                 self.last_file = file
-                # time.sleep(0.1)
+                time.sleep(0.1)
 
-            # time.sleep(0.001)
+            # time.sleep(0.1)
         except KeyboardInterrupt:
             print("Exiting.")
             self.vis.destroy_window()
