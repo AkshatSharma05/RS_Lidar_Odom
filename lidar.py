@@ -16,6 +16,7 @@ class LidarOdometry:
         self.frame_count = 0
 
         self.local_map = None
+        self.global_map_2d = None
 
         self.vis = o3d.visualization.Visualizer()
         self.vis.create_window("LIDAR")
@@ -46,19 +47,20 @@ class LidarOdometry:
 
 
         self.stop_event = threading.Event()
-        self.pygame_thread = threading.Thread(target=self.pygame_plotter, args=(self.get_pos,  self.get_local_map, self.stop_event))
+        self.pygame_thread = threading.Thread(target=self.pygame_plotter, args=(self.get_pos,  self.get_global_map, self.stop_event))
         self.pygame_thread.start()
 
     def get_pos(self):
         return self.XPOS, self.YPOS
 
-    def get_local_map(self):
-        return self.local_map
+    def get_global_map(self):
+        return self.global_map_2d
 
     def pygame_plotter(self, get_pos, get_map, stop_event):
         pygame.init()
+        show_odom = True
         size = 600
-        screen = pygame.display.set_mode((size, size))  # Single panel
+        screen = pygame.display.set_mode((size, size)) 
         pygame.display.set_caption("Odometry + 2D Lidar Map")
         clock = pygame.time.Clock()
 
@@ -84,23 +86,39 @@ class LidarOdometry:
                     return
 
             screen.fill(white)
-
+            
+            if show_odom:
             # === Draw odometry ===
-            xpos, ypos = get_pos()
-            points.append(world_to_screen(xpos, ypos))
-            if len(points) > 1:
-                pygame.draw.lines(screen, blue, False, points, 2)
-            for pt in points:
-                pygame.draw.circle(screen, black, pt, 2)
+                xpos, ypos = get_pos()
+                points.append(world_to_screen(xpos, ypos))
+                if len(points) > 1:
+                    pygame.draw.lines(screen, blue, False, points, 2)
+                for pt in points:
+                    pygame.draw.circle(screen, black, pt, 2)
 
-            # === Draw lidar map (in global frame) ===
-            local_map = get_map()
-            if local_map is not None:
-                for pt in local_map:
-                    x, y = pt[0], pt[1]
-                    sx, sy = world_to_screen(x, y)
-                    if 0 <= sx < size and 0 <= sy < size:
-                        pygame.draw.circle(screen, red, (sx, sy), 1)
+                # === Draw lidar map (in global frame) ===
+                global_map = get_map()
+                if global_map is not None:
+                    for pt in global_map:
+                        x, y = pt[0], pt[1]
+                        sx, sy = world_to_screen(x, y)
+                        if 0 <= sx < size and 0 <= sy < size:
+                            pygame.draw.circle(screen, red, (sx, sy), 1)
+
+            if self.current_frame % 50 == 0: 
+                show_odom = False
+                screen.fill(white)
+                global_map = get_map()
+                if global_map is not None:
+                    for pt in global_map:
+                        x, y = pt[0], pt[1]
+                        sx, sy = world_to_screen(x, y)
+                        if 0 <= sx < size and 0 <= sy < size:
+                            pygame.draw.circle(screen, red, (sx, sy), 1)
+
+                pygame.display.flip()
+                pygame.image.save(screen, f"map.png")
+                show_odom = True
 
             pygame.display.flip()
             clock.tick(30)
@@ -139,13 +157,12 @@ class LidarOdometry:
             static_points = [np.array(key, dtype=float) * voxel_size
                             for key, val in voxel_map.items() if val[2]]
             global_map.points = o3d.utility.Vector3dVector(np.array(static_points))
-
         
         if last_file is not None:
             last_pcd = o3d.io.read_point_cloud(last_file)
             last_pcd = last_pcd.voxel_down_sample(voxel_size=0.1)
             try:
-                self.local_map = get_map_2d(self.global_map, z_min=0.0, z_max=2.0)
+                self.global_map_2d = get_map_2d(self.global_map, z_min=-0.8, z_max=-0.2)
 
                 transformation, _ = self.perform_icp_point_to_plane(last_pcd, new_pcd)
                 if not np.allclose(transformation, np.eye(4), atol=1e-2): #allclose checks if two matrices are equal
@@ -181,8 +198,6 @@ class LidarOdometry:
             trajectory.append(self.odometry[:3, 3].copy())
             self.traj_points.append(self.odometry[:3, 3].copy())
             self.XPOS, self.YPOS = self.odometry[0, 3], self.odometry[1, 3]
-            map_points = new_pcd.transform(self.odometry.copy()).points
-            self.global_map.points.extend(map_points)
 
     def perform_icp_point_to_plane(self, source, target):
         # to find surface normals -> needed for point to plane  
@@ -195,7 +210,7 @@ class LidarOdometry:
         #     target,
         #     search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=1, max_nn=30))
 
-        threshold = 1.5 
+        threshold = 10.0
         trans_init = self.transformation
 
         reg_p2p = o3d.pipelines.registration.registration_icp(
