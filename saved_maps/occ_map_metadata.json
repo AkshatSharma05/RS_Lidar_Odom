@@ -1,0 +1,9 @@
+{
+    "map_resolution_m_per_pixel": 0.1,
+    "global_map_size_pixels": 1000,
+    "origin_pixel": [
+        500,
+        500
+    ],
+    "map_size_m": 100
+}

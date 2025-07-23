@@ -59,7 +59,9 @@ class LidarOdometry:
     def pygame_plotter(self, get_pos, get_map, stop_event):
         pygame.init()
         show_odom = True
-        size = 600
+        # size = 600
+        map_resolution = 50  # px/m
+        size = int((world_max - world_min) * map_resolution) 
         screen = pygame.display.set_mode((size, size)) 
         pygame.display.set_caption("Odometry + 2D Lidar Map")
         clock = pygame.time.Clock()
@@ -78,6 +80,11 @@ class LidarOdometry:
             sx = int((x - world_min) / (world_max - world_min) * size)
             sy = int(size - (y - world_min) / (world_max - world_min) * size)
             return sx, sy
+
+        def screen_to_world(sx, sy):
+            x = (sx / size) * (world_max - world_min) + world_min
+            y = ((size - sy) / size) * (world_max - world_min) + world_min
+            return x, y
 
         while not stop_event.is_set():
             for event in pygame.event.get():
@@ -118,6 +125,12 @@ class LidarOdometry:
 
                 pygame.display.flip()
                 pygame.image.save(screen, f"map.png")
+                with open("map_metadata.txt", "w") as f:
+                    f.write(f"world_min: {world_min}\n")
+                    f.write(f"world_max: {world_max}\n")
+                    f.write(f"resolution: {map_resolution}\n")
+                    f.write(f"image_size: {size}x{size}\n")
+
                 show_odom = True
 
             pygame.display.flip()
